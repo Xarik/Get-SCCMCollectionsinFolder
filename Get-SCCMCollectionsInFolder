@@ -1,0 +1,132 @@
+Function Get-SCCMCollectionsInFolder
+{
+	# .SYNOPSIS
+	#       A function for listing collections inside af configmgr 2012 device folder
+	#
+	#	This function only does to Device Collections! The FolderType parameter has been
+    	#       removed as it's not needed in our environment and I couldn't find a
+    	#       solution for passing a parameter set to a dynamic parameter as a value
+	#
+	# .PARAMETER  siteServer
+	#		NETBIOS or FQDN address for the configurations manager 2012 site server
+    	#       Default values have been removed for public sharing
+	#
+	# .PARAMETER  siteCide
+	#		Site Code for the configurations manager 2012 site server
+    	#       Default values have been removed for public sharing
+	#
+	# .PARAMETER  FolderName
+	#		Folder name(s) of the folder(s) to list - Autofills with the existing collections found in SCCM
+	#		when intellisence is enabled and '-foldername' is include. 
+	#
+	# .PARAMETER  FolderType <removed>
+	#		Device or User Collection (Valid Inputs: Device, User)
+	#    .EXAMPLE
+	#       Get-CollectionsInFolder folderName 'Imaging & Testing'
+	#       Listing all collections inside Imaging & Testing on defaul siteserver
+	#
+	#    .EXAMPLE
+	#       #Get-CollectionsInFolder -siteServer "contoso.ad.com" -siteCode CO1 -Foldername 'UNDER REVIEW - Maintenance'
+	#       Listing all collections inside - UNDER REVIEW - Maintenance on siteserver CO1
+	#
+	#    .INPUTS
+	#      Accepts a collection of strings that contain folder name, and each folder will be processed
+	#
+	#    .OUTPUTS
+	#        Custom Object (Properties: CollectionName, CollectionID)
+	#
+	#    .NOTES
+	#        Developed by Jakob Gottlieb Svendsen - Coretech A/S
+	#        Revised by Lane Schwartz - lanefschwartz@gmail.com
+	#
+	#    .LINK
+	#        Information sources from: 
+	#        https://blog.ctglobalservices.com
+	#        https://blog.ctglobalservices.com/jgs
+	#        https://martin77s.wordpress.com/2014/06/09/dynamic-validateset-in-a-dynamic-parameter/
+	#        https://community.spiceworks.com/topic/1295222-powershell-populate-a-validate-set-from-script
+
+
+    [CmdletBinding(SupportsShouldProcess=$True,
+                         ConfirmImpact="Low")]
+    param(  
+        
+    ####These lines have been removed pending a way to pass parameteres as variables into the dynamic parameter $foldername    
+	#[parameter(Mandatory=$false)]
+    #[String]
+    #[ValidateRange("Device","User")]
+	#$FolderType = "Device",
+
+    [parameter(Mandatory=$false, HelpMessage=”System Center Configuration Manager 2012 Site Server - Server Name”,ValueFromPipelineByPropertyName=$true)]
+    $siteServer = "Contoso.ad.com",
+
+    [parameter(Mandatory=$false, HelpMessage=”System Center Configuration Manager 2012 Site Server - Site Code”,ValueFromPipelineByPropertyName=$true)]
+    [ValidatePattern("\w{3}")]
+    [String] $siteCode = "CO1"
+
+    )
+    DynamicParam{
+        $ParameterName = 'Foldername'
+
+        $attributes = new-object System.Management.Automation.ParameterAttribute
+        $attributes.Mandatory = $true
+        $attributes.position = 0
+
+        $attributeCollection = new-object -TypeName System.Collections.ObjectModel.Collection[System.Attribute]
+        $attributeCollection.Add($attributes)
+
+        $arrSet = (get-wmiobject -ComputerName $siteServer -Namespace root\sms\site_$siteCode  -class SMS_ObjectContainernode | where-object -property objecttype -eq 5000).name
+        $ValidateSetAttribute = New-Object System.Management.Automation.ValidateSetAttribute($arrSet)
+        $AttributeCollection.Add($ValidateSetAttribute)
+
+        $dynParam1 = new-object -Type System.Management.Automation.RuntimeDefinedParameter($Parametername, [string], $attributeCollection)
+            
+        $paramDictionary = new-object -Type System.Management.Automation.RuntimeDefinedParameterDictionary
+        $paramDictionary.Add($Parametername, $dynParam1)
+        
+        return $paramDictionary
+
+    }
+
+
+    Begin{
+
+    ####These lines have been removed pending a way to pass parameteres as variables into the dynamic parameter $foldername
+			#Switch ($FolderType)
+			#{
+			#"Device" { $ObjectType = "5000" }
+			#"User" { $ObjectType = "5001" }
+			#}
+
+
+            foreach($key in $PSBoundParameters.keys){
+                if ($MyInvocation.MyCommand.Parameters.$key.isDynamic)
+                    {
+                        set-variable -name $key -Value $PSBoundParameters.$key
+                    }
+                }
+            
+            $Foldername = $PSBoundParameters[$parametername]
+
+	}
+    Process
+    {
+           foreach ($folderN in $folderName)
+           {
+            $folder = get-wmiobject -ComputerName $siteServer -Namespace root\sms\site_$siteCode  -class SMS_ObjectContainernode | where-object{($_.Objecttype -eq 5000 -and $_.name -eq $($FolderN))}
+
+			if ($folder -ne $null)
+			{
+	            "Folder: {0} ({1})" -f $folder.Name, $folder.ContainerNodeID | out-host
+
+	            get-wmiobject -ComputerName $siteServer -Namespace root\sms\site_$siteCode  -class SMS_ObjectContainerItem -filter "ContainerNodeID = $($folder.ContainerNodeID)" |
+	            select @{Label="CollectionName";Expression={(get-wmiobject -ComputerName $siteServer -Namespace root\sms\site_$siteCode  -class SMS_Collection -filter "CollectionID = '$($_.InstanceKey)'").Name}},@{Label="CollectionID";Expression={$_.InstanceKey}}
+			}
+			else
+			{
+				Write-Host "Device Folder Name: $folderName not found"
+			}
+           }
+    }
+    End{}
+ } 
